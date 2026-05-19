@@ -785,25 +785,24 @@ function extractCompany(rawText) {
   const ownRe = new RegExp(OWN.join('|'), 'i');
   const CORP_LIST = ['株式会社','有限会社','合同会社','一般社団法人','公益社団法人','（株）','㈱'];
 
-  // OCRは空白・改行を不規則に挿入するため
-  // ① 元テキスト ② 空白/改行を完全除去したフラット文字列 の両方で検索する
+  // 空白・改行を除去したフラット文字列
   const flat = rawText.replace(/[\s\u3000]/g, '');
   const candidates = [];
   const seen = new Set();
 
   function addCandidate(name, pri) {
     const n = name
-      .replace(/[\s\u3000]/g, '')                          // 空白除去
-      .replace(/株式会社|有限会社|合同会社|一般社団法人|公益社団法人|（株）|㈱/g, '') // 商号除去
-      .replace(/[0-9０-９\-－:：\/\\.,，。、（()）【】「」『』〒]/g, '') // 記号除去
+      .replace(/[\s\u3000]/g, '')
+      .replace(/株式会社|有限会社|合同会社|一般社団法人|公益社団法人|（株）|㈱/g, '')
+      .replace(/[0-9０-９\-－:：\/\\.,，。、（()）【】「」『』〒御中様]/g, '')
       .trim();
-    if (n.length >= 2 && !ownRe.test(n) && !seen.has(n)) {
+    if (n.length >= 2 && n.length <= 15 && !ownRe.test(n) && !seen.has(n)) {
       seen.add(n);
       candidates.push({ name: n, pri });
     }
   }
 
-  // ── フラットテキストで商号の前後を取得（OCRスペース挿入に対応）──
+  // ── フラットテキストで商号の前後を取得 ──
   for (const corp of CORP_LIST) {
     let pos = 0;
     while (pos < flat.length) {
@@ -811,43 +810,101 @@ function extractCompany(rawText) {
       if (idx === -1) break;
       pos = idx + 1;
 
-      // 前株：株式会社○○ → 後ろ最大10文字
+      // 前株：株式会社○○ → 後ろ最大12文字
       const after = flat.slice(idx + corp.length, idx + corp.length + 12)
-        .replace(/[0-9\-－:：\/\\.,，。、（()）【】「」〒]/g, '');
-      addCandidate(after, 3);
+        .replace(/[0-9\-－:：\/\\.,，。、（()）【】「」〒御中様]/g, '');
+      if (after.length >= 2) addCandidate(after, 3);
 
-      // 後株：○○株式会社 → 前の最大10文字
+      // 後株：○○株式会社 → 前の最大12文字
       const before = flat.slice(Math.max(0, idx - 12), idx)
         .replace(/[0-9\-－:：\/\\.,，。、（()）【】「」〒]/g, '');
-      addCandidate(before, 3);
+      if (before.length >= 2) addCandidate(before, 3);
     }
   }
 
-  // ── 元テキストで「御中」直前パターン（優先度最高）──
-  // 「アリアフィーナ 株式会社 御中」「株式会社アマナ\n御中」など
-  const ochuRe = /(.{2,30}?)\s*御中/g;
-  let m;
-  while ((m = ochuRe.exec(rawText)) !== null) {
-    const chunk = m[1];
-    // 商号を含む行を優先
-    if (CORP_LIST.some(c => chunk.replace(/\s/g,'').includes(c))) {
-      addCandidate(chunk, 5);
-    } else {
-      addCandidate(chunk, 4);
+  // ── 「御中」パターン：御中の「前」にある会社名を取得（優先度最高）──
+  // 「アリアフィーナ　株式会社　御中」→ 御中の直前の塊を取る
+  const lines = rawText.split(/[\n\r]/);
+  for (const line of lines) {
+    if (line.includes('御中')) {
+      // 御中より前の部分を取得
+      const before = line.split('御中')[0].trim();
+      if (before.length >= 2) addCandidate(before, 5);
     }
   }
 
   // ── ラベルパターン ──
   const labelRe = /(?:請求先|発注元|取引先|お客様|宛先)\s*[：:]\s*(.{2,20})/g;
+  let m;
   while ((m = labelRe.exec(rawText)) !== null) {
     addCandidate(m[1], 2);
   }
 
   if (!candidates.length) return null;
-
-  // 優先度の高いものを返す（同優先度なら短い方＝余計な文字が少ない）
   candidates.sort((a, b) => b.pri - a.pri || a.name.length - b.name.length);
   return candidates[0].name;
+}
+
+// ── テキストから金額を抽出 ──
+function extractAmount(rawText) {
+  const results = [];
+
+  // 請求書番号・伝票番号・番号系を除外するための前処理
+  // 「V000007325」「No.12345」「番号」の後の数字は金額ではない
+  const cleaned = rawText
+    .replace(/(?:請求書番号|伝票番号|注文番号|発注番号|No\.|番号)[^\d]{0,5}[\dA-Za-z\-]+/gi, '')
+    .replace(/[A-Za-z][0-9]{6,}/g, '') // 「V000007325」のような英字始まりの番号を除外
+    .replace(/\u3012[\d\-]+/g, '')      // 〒郵便番号を除外
+    .replace(/\d{3}-\d{4}/g, '')        // 郵便番号形式を除外
+    .replace(/\d{2,4}-\d{2,4}-\d{4}/g, ''); // 電話番号形式を除外
+
+  const cleanNum = s => s
+    .replace(/[oO]/g, '0')
+    .replace(/[lI|]/g, '1')
+    .replace(/[Ss]/g, '5')
+    .replace(/[,，、.\s]/g, '')
+    .replace(/[^0-9]/g, '');
+
+  let m;
+
+  // ── 優先度3：「請求金額」「合計金額」「御請求金額」直後 ──
+  const hiRe = /(?:御請求金額|請求金額|合計金額|お支払金額|お支払い金額|ご請求金額)[^\d]{0,15}([\d,，.\s]{3,15})/gi;
+  while ((m = hiRe.exec(cleaned)) !== null) {
+    const n = cleanNum(m[1]);
+    if (parseInt(n) >= 1000) results.push({ val: n, pri: 3 });
+  }
+
+  // ── 優先度2：「合計」「請求」「総額」直後 ──
+  const midRe = /(?:合計|総計|総額|請求額|お支払|支払金額|ご請求|御請求|amount|total)[^\d]{0,20}([\d,，.\s]{3,15})/gi;
+  while ((m = midRe.exec(cleaned)) !== null) {
+    const n = cleanNum(m[1]);
+    if (parseInt(n) >= 1000) results.push({ val: n, pri: 2 });
+  }
+
+  // ── 優先度2：¥マーク直後（1,000円以上）──
+  const yenRe = /[¥￥]\s?([\d,，.\s]{3,15})/g;
+  while ((m = yenRe.exec(cleaned)) !== null) {
+    const n = cleanNum(m[1]);
+    if (parseInt(n) >= 1000) results.push({ val: n, pri: 2 });
+  }
+
+  // ── 優先度1：「円」前の数値（1,000円以上）──
+  const enRe = /([\d,，.\s]{3,15})円/g;
+  while ((m = enRe.exec(cleaned)) !== null) {
+    const n = cleanNum(m[1]);
+    if (parseInt(n) >= 1000) results.push({ val: n, pri: 1 });
+  }
+
+  // ── 優先度1：カンマ区切り数値（10,000以上に絞る）──
+  const commaRe = /\b(\d{1,3}(?:[,，]\d{3})+)\b/g;
+  while ((m = commaRe.exec(cleaned)) !== null) {
+    const n = cleanNum(m[1]);
+    if (parseInt(n) >= 10000) results.push({ val: n, pri: 1 });
+  }
+
+  if (!results.length) return null;
+  results.sort((a, b) => b.pri - a.pri || parseInt(b.val) - parseInt(a.val));
+  return results[0].val;
 }
 
 // ── テキストから金額を抽出 ──
