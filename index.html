@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ファイル名生成ツール — FUJIOH</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
   :root {
     --bg: #f0ede8;
@@ -385,7 +386,7 @@
         <div class="dz-ico" id="dzIco">📂</div>
         <div class="dz-t" id="dzT">ファイルをドラッグ＆ドロップ</div>
         <div class="dz-s" id="dzS">またはクリックしてファイルを選択</div>
-        <div class="dz-hint">テキスト・CSV対応（PDF・画像はテキスト抽出なし）</div>
+        <div class="dz-hint">PDF・テキスト・CSV対応（スキャン画像PDFは手動入力）</div>
       </div>
       <div id="extMsg"></div>
 
@@ -556,12 +557,13 @@ function procFile(file) {
     r.onload = e => parseText(e.target.result, file);
     r.onerror = () => fileError();
     r.readAsText(file, 'UTF-8');
-  } else if (['png','jpg','jpeg','pdf'].includes(ext)) {
-    // 画像・PDFはテキスト抽出なし→ファイル名から推測
+  } else if (ext === 'pdf') {
+    extractPdfText(file);
+  } else if (['png','jpg','jpeg'].includes(ext)) {
     dz.classList.remove('busy'); dz.classList.add('done');
-    document.getElementById('dzIco').textContent = '📄';
+    document.getElementById('dzIco').textContent = '🖼️';
     document.getElementById('dzS').textContent = (file.size/1024).toFixed(1) + ' KB';
-    showMsg('extMsg', 'warn', '⚠ 画像・PDFはテキスト抽出に対応していません。会社名・金額を手動で入力してください。');
+    showMsg('extMsg', 'warn', '⚠ 画像ファイルはテキスト抽出に対応していません。会社名・金額を手動で入力してください。');
     markStep(2, true);
   } else {
     fileError();
@@ -572,6 +574,45 @@ function fileError() {
   dz.classList.remove('busy');
   document.getElementById('dzIco').textContent = '❌';
   showMsg('extMsg', 'ng', '⚠ このファイル形式は対応していません。手動で入力してください。');
+}
+
+async function extractPdfText(file) {
+  try {
+    if (typeof pdfjsLib === 'undefined') {
+      throw new Error('PDF.jsが読み込まれていません');
+    }
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let fullText = '';
+
+    // 全ページのテキストを結合（最大10ページ）
+    const maxPages = Math.min(pdf.numPages, 10);
+    for (let i = 1; i <= maxPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items.map(item => item.str).join(' ');
+      fullText += pageText + '\n';
+    }
+
+    if (!fullText.trim()) {
+      dz.classList.remove('busy'); dz.classList.add('done');
+      document.getElementById('dzIco').textContent = '📄';
+      document.getElementById('dzS').textContent = (file.size/1024).toFixed(1) + ' KB';
+      showMsg('extMsg', 'warn', '⚠ このPDFからテキストを抽出できませんでした（スキャン画像PDFの可能性があります）。手動で入力してください。');
+      markStep(2, true);
+      return;
+    }
+
+    parseText(fullText, file);
+
+  } catch(e) {
+    dz.classList.remove('busy');
+    document.getElementById('dzIco').textContent = '❌';
+    showMsg('extMsg', 'ng', '⚠ PDF読み込みエラー：' + e.message + '　手動で入力してください。');
+  }
 }
 
 function parseText(text, file) {
