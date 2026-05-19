@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ファイル名生成ツール — FUJIOH</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
   :root {
     --bg: #f0ede8;
@@ -301,6 +302,42 @@
   .step.active { background: var(--accent-bg); color: var(--accent-text); }
   .step-num { display: block; font-size: 14px; font-weight: 700; }
 
+  /* ── Paste area ── */
+  .paste-area {
+    border: 2px dashed var(--accent-border);
+    border-radius: var(--r);
+    padding: 14px 16px;
+    background: var(--accent-bg);
+    margin-bottom: 10px;
+    cursor: text;
+    transition: all .2s;
+    position: relative;
+  }
+  .paste-area:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(26,79,160,.1); }
+  .paste-area.has-img { background: var(--surface2); border-color: var(--success-border); }
+  .paste-area-label {
+    font-size: 12px; font-weight: 600; color: var(--accent-text);
+    display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+  }
+  .paste-area-hint { font-size: 11px; color: var(--text-3); margin-top: 4px; }
+  .paste-preview {
+    max-width: 100%; max-height: 180px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--border-mid);
+    display: block; margin: 0 auto;
+  }
+  .ocr-progress {
+    background: var(--surface2);
+    border-radius: var(--r-sm);
+    height: 6px; overflow: hidden; margin-top: 8px;
+  }
+  .ocr-bar {
+    height: 100%; background: var(--accent);
+    border-radius: var(--r-sm);
+    transition: width .3s;
+    width: 0%;
+  }
+
   /* ── Footer ── */
   .footer {
     text-align: center; font-size: 11px; color: var(--text-3);
@@ -379,14 +416,30 @@
         </div>
       </div>
 
-      <!-- ② File drop -->
-      <div class="sec">② ファイルをドロップして情報を抽出</div>
+      <!-- ② File drop / paste -->
+      <div class="sec">② ファイルまたは画像から情報を抽出</div>
+
+      <!-- Paste area -->
+      <div class="paste-area" id="pasteArea" tabindex="0">
+        <div class="paste-area-label">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          ここをクリックして Ctrl+V で画像を貼り付け（OCR自動認識）
+        </div>
+        <div id="pasteContent">
+          <div class="paste-area-hint">請求書・注文書などをスクリーンショットまたはコピーして貼り付けてください</div>
+        </div>
+        <div class="ocr-progress" id="ocrProgress" style="display:none">
+          <div class="ocr-bar" id="ocrBar"></div>
+        </div>
+      </div>
+
+      <!-- Drop zone -->
       <div class="dz" id="dz" onclick="document.getElementById('fi').click()">
         <input type="file" id="fi" accept=".pdf,.png,.jpg,.jpeg,.txt,.csv" onchange="onFile(event)">
         <div class="dz-ico" id="dzIco">📂</div>
         <div class="dz-t" id="dzT">ファイルをドラッグ＆ドロップ</div>
         <div class="dz-s" id="dzS">またはクリックしてファイルを選択</div>
-        <div class="dz-hint">PDF・テキスト・CSV対応（スキャン画像PDFは手動入力）</div>
+        <div class="dz-hint">PDF・テキスト・CSV・画像ファイルに対応</div>
       </div>
       <div id="extMsg"></div>
 
@@ -489,6 +542,82 @@
 // ── 自社名リスト（除外用） ──
 const OWN = ['アリアフィーナ','ariafina','ARIAFINA','富士工業','フジコー','fujioh','FUJIOH'];
 
+// ── Ctrl+V ペースト処理 ──
+const pasteArea = document.getElementById('pasteArea');
+pasteArea.addEventListener('paste', async (e) => {
+  e.preventDefault();
+  const items = e.clipboardData.items;
+  let imageBlob = null;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      imageBlob = item.getAsFile();
+      break;
+    }
+  }
+  if (!imageBlob) {
+    showMsg('extMsg', 'warn', '⚠ 画像が見つかりません。画像をコピーしてから貼り付けてください。');
+    return;
+  }
+  runOCR(imageBlob);
+});
+
+// ── OCR実行（Tesseract.js） ──
+async function runOCR(blob) {
+  const url = URL.createObjectURL(blob);
+
+  // プレビュー表示
+  const pasteContent = document.getElementById('pasteContent');
+  pasteContent.innerHTML = `<img src="${url}" class="paste-preview" alt="貼り付けた画像">`;
+  pasteArea.classList.add('has-img');
+
+  // プログレスバー表示
+  document.getElementById('ocrProgress').style.display = 'block';
+  document.getElementById('ocrBar').style.width = '0%';
+  showMsg('extMsg', 'warn', '<span class="spin"></span> OCR処理中...初回は20〜30秒かかります');
+
+  try {
+    const worker = await Tesseract.createWorker('jpn', 1, {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          const pct = Math.round(m.progress * 100);
+          document.getElementById('ocrBar').style.width = pct + '%';
+        }
+      }
+    });
+
+    const result = await worker.recognize(blob);
+    await worker.terminate();
+    URL.revokeObjectURL(url);
+
+    document.getElementById('ocrProgress').style.display = 'none';
+    const text = result.data.text;
+
+    if (!text.trim()) {
+      showMsg('extMsg', 'warn', '⚠ テキストを認識できませんでした。手動で入力してください。');
+      return;
+    }
+
+    // テキスト抽出
+    const company = extractCompany(text);
+    const amount  = extractAmount(text);
+
+    document.getElementById('extSection').style.display = 'block';
+    setExtField('extCo', 'badgeCo', 'iCo', company);
+    setExtField('extAmt', 'badgeAmt', 'iAmt', amount);
+
+    const parts = [];
+    if (company) parts.push('会社名：' + company);
+    if (amount)  parts.push('金額：'   + amount);
+    showMsg('extMsg', 'ok', '✓ OCR完了 ' + (parts.length ? parts.join('　') : '— 内容を確認して手動修正してください'));
+    markStep(2, true);
+    preview();
+
+  } catch(e) {
+    document.getElementById('ocrProgress').style.display = 'none';
+    showMsg('extMsg', 'ng', '⚠ OCRエラー：' + e.message);
+  }
+}
+
 let docType = '注文書';
 let histData = [];
 let stepDone = [false, false, false, false, false];
@@ -560,11 +689,7 @@ function procFile(file) {
   } else if (ext === 'pdf') {
     extractPdfText(file);
   } else if (['png','jpg','jpeg'].includes(ext)) {
-    dz.classList.remove('busy'); dz.classList.add('done');
-    document.getElementById('dzIco').textContent = '🖼️';
-    document.getElementById('dzS').textContent = (file.size/1024).toFixed(1) + ' KB';
-    showMsg('extMsg', 'warn', '⚠ 画像ファイルはテキスト抽出に対応していません。会社名・金額を手動で入力してください。');
-    markStep(2, true);
+    runOCR(file);
   } else {
     fileError();
   }
@@ -794,6 +919,11 @@ function resetAll() {
     el.value = ''; el.classList.remove('ok','err');
   });
   document.getElementById('iPick').value = '';
+  document.getElementById('pasteContent').innerHTML =
+    '<div class="paste-area-hint">請求書・注文書などをスクリーンショットまたはコピーして貼り付けてください</div>';
+  pasteArea.classList.remove('has-img');
+  document.getElementById('ocrProgress').style.display = 'none';
+  document.getElementById('ocrBar').style.width = '0%';
   dz.classList.remove('done','busy','over');
   document.getElementById('dzIco').textContent = '📂';
   document.getElementById('dzT').textContent = 'ファイルをドラッグ＆ドロップ';
