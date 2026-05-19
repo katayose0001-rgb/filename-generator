@@ -762,48 +762,109 @@ function parseText(text, file) {
   preview();
 }
 
+// ── OCRテキスト前処理：空白・改行を正規化 ──
+function normalizeOcrText(text) {
+  // 全角スペース→半角、連続空白を1つに、改行を統一
+  return text
+    .replace(/　/g, ' ')
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+}
+
+// ── 商号を除いた純粋な社名を返す ──
+function stripCorpSuffix(s) {
+  return s
+    .replace(/株式会社|有限会社|合同会社|一般社団法人|公益社団法人|特定非営利活動法人|NPO法人|（株）|\(株\)|㈱/g, '')
+    .replace(/[　 ]+/g, '')
+    .trim();
+}
+
 // ── テキストから会社名を抽出 ──
-function extractCompany(text) {
+function extractCompany(rawText) {
+  const text = normalizeOcrText(rawText);
   const ownRe = new RegExp(OWN.join('|'), 'i');
-  // 商号ワード
-  const CORP = '(?:株式会社|有限会社|合同会社|一般社団法人|公益社団法人|特定非営利活動法人|NPO法人|（株）|㈱)';
-  const NAME = '[^\\s　、,，。．\\n（()）【】「」『』]{1,20}';
+
+  // OCRは空白が不規則に挿入されるため、空白を無視してマッチできる結合テキストも用意
+  const flat = text.replace(/\s/g, '');
 
   const candidates = [];
 
-  // パターン① 前株：「株式会社アマナ」→ アマナ
-  const reFwd = new RegExp(CORP + '[\\s　]*(' + NAME + ')', 'g');
+  // ── 商号パターン（空白が挿入されていても対応）──
+  // 「株 式 会 社 ア イ ワ」のようにOCRがスペースを入れるケースに対応
+  const corpVariants = [
+    '株式会社', '有限会社', '合同会社', '一般社団法人', '（株）', '㈱'
+  ];
+
+  // flatテキストで商号＋社名 or 社名＋商号を探す
+  for (const corp of corpVariants) {
+    // 前株：株式会社○○
+    const idxFwd = flat.indexOf(corp);
+    if (idxFwd !== -1) {
+      const after = flat.slice(idxFwd + corp.length, idxFwd + corp.length + 20)
+        .replace(/[0-9\-－:：\/\\.,，。、（()）【】「」\s]/g, '');
+      if (after.length >= 2 && !ownRe.test(after)) {
+        candidates.push({ name: after, pri: 3 });
+      }
+    }
+    // 後株：○○株式会社
+    const idxBack = flat.indexOf(corp);
+    if (idxBack > 0) {
+      const before = flat.slice(Math.max(0, idxBack - 20), idxBack)
+        .replace(/[0-9\-－:：\/\\.,，。、（()）【】「」\s]/g, '');
+      if (before.length >= 2 && !ownRe.test(before)) {
+        candidates.push({ name: before, pri: 3 });
+      }
+    }
+  }
+
+  // 全出現位置を検索（複数の会社名がある場合に対応）
+  for (const corp of corpVariants) {
+    let pos = 0;
+    while (true) {
+      const idx = flat.indexOf(corp, pos);
+      if (idx === -1) break;
+      pos = idx + 1;
+
+      // 前株（株式会社○○）
+      const afterRaw = flat.slice(idx + corp.length, idx + corp.length + 15)
+        .replace(/[0-9\-－:：\/\\.,，。、（()）【】「」]/g, '');
+      if (afterRaw.length >= 2 && !ownRe.test(afterRaw)) {
+        candidates.push({ name: afterRaw, pri: 3 });
+      }
+
+      // 後株（○○株式会社）
+      const beforeRaw = flat.slice(Math.max(0, idx - 15), idx)
+        .replace(/[0-9\-－:：\/\\.,，。、（()）【】「」]/g, '');
+      if (beforeRaw.length >= 2 && !ownRe.test(beforeRaw)) {
+        candidates.push({ name: beforeRaw, pri: 3 });
+      }
+    }
+  }
+
+  // 「御中」直前パターン（優先度最高）
+  const ochuRe = /([^\n]{2,25}(?:株式会社|有限会社|合同会社|（株）|㈱)[^\n]{0,10})\s*御中/g;
+  const ochuRe2 = /([^\n]{2,25})\s*御中/g;
   let m;
-  while ((m = reFwd.exec(text)) !== null) {
-    const n = m[1].trim();
-    if (n.length >= 2 && !ownRe.test(n)) candidates.push({ name: n, pri: 3 });
+  while ((m = ochuRe.exec(text)) !== null) {
+    const n = stripCorpSuffix(m[1]);
+    if (n.length >= 2 && !ownRe.test(n)) candidates.push({ name: n, pri: 5 });
+  }
+  while ((m = ochuRe2.exec(text)) !== null) {
+    const n = stripCorpSuffix(m[1]).replace(/\s/g,'');
+    if (n.length >= 2 && !ownRe.test(n)) candidates.push({ name: n, pri: 4 });
   }
 
-  // パターン② 後株：「アマナ株式会社」→ アマナ
-  const reBack = new RegExp('(' + NAME + ')[\\s　]*' + CORP, 'g');
-  while ((m = reBack.exec(text)) !== null) {
-    const n = m[1].trim();
-    if (n.length >= 2 && !ownRe.test(n)) candidates.push({ name: n, pri: 3 });
-  }
-
-  // パターン③ 「御中」の直前にある会社名（「株式会社アマナ 御中」）
-  const reOchu = new RegExp('(' + NAME + CORP + '[\\s　]*|' + CORP + NAME + '[\\s　]*)御中', 'g');
-  while ((m = reOchu.exec(text)) !== null) {
-    // 商号を除いた純粋な社名部分を取り出す
-    const raw = m[1].trim().replace(/株式会社|有限会社|合同会社|一般社団法人|（株）|㈱/g, '').trim();
-    if (raw.length >= 2 && !ownRe.test(raw)) candidates.push({ name: raw, pri: 4 });
-  }
-
-  // パターン④ ラベル後：「請求先：アマナ株式会社」など
-  const reLabel = /(?:請求先|発注元|取引先|お客様|宛先)[：:\s　]{0,3}([^\s　\n]{2,20})/g;
-  while ((m = reLabel.exec(text)) !== null) {
-    const raw = m[1].replace(/株式会社|有限会社|合同会社|（株）|㈱/g, '').trim();
-    if (raw.length >= 2 && !ownRe.test(raw)) candidates.push({ name: raw, pri: 2 });
+  // ラベルパターン
+  const labelRe = /(?:請求先|発注元|取引先|お客様|宛先)\s*[：:]\s*([^\n]{2,25})/g;
+  while ((m = labelRe.exec(text)) !== null) {
+    const n = stripCorpSuffix(m[1]).replace(/\s/g,'');
+    if (n.length >= 2 && !ownRe.test(n)) candidates.push({ name: n, pri: 2 });
   }
 
   if (!candidates.length) return null;
 
-  // 優先度→出現回数の順でソートし最上位を返す
+  // 優先度→出現回数でソート
   const freq = {};
   candidates.forEach(c => {
     const k = c.name;
@@ -812,35 +873,74 @@ function extractCompany(text) {
     if (c.pri > freq[k].pri) freq[k].pri = c.pri;
   });
 
-  const sorted = Object.entries(freq).sort((a, b) =>
-    b[1].pri - a[1].pri || b[1].count - a[1].count
-  );
-  return sorted[0][0];
+  // 自社名を最終除外
+  const filtered = Object.entries(freq).filter(([k]) => !ownRe.test(k));
+  if (!filtered.length) return null;
+
+  filtered.sort((a, b) => b[1].pri - a[1].pri || b[1].count - a[1].count);
+  return filtered[0][0];
 }
 
 // ── テキストから金額を抽出 ──
-function extractAmount(text) {
-  // 「合計」「総額」「お支払い」「請求額」「金額」などに続く数字を優先
-  const priorityRe = /(?:合計|総計|総額|請求[金額]|お支払[金額い]|支払[金額]|御請求|amount|total)[^\d]{0,10}([0-9,，]{3,})/gi;
-  const generalRe  = /[¥￥\\][\s]?([0-9,，]{3,})|([0-9]{1,3}(?:[,，][0-9]{3})+)(?:\s*円)?/g;
+function extractAmount(rawText) {
+  const text = normalizeOcrText(rawText);
+
+  // OCRは「146,500」が「146,S00」「146 500」「146.500」のように化けることがある
+  // → 数字の間に混入したアルファベット・記号も考慮して正規化
+  const cleanNum = s => s
+    .replace(/[oO]/g, '0')   // OCR誤認 o→0
+    .replace(/[lI|]/g, '1')  // OCR誤認 l/I→1
+    .replace(/[Ss]/g, '5')   // OCR誤認 S→5
+    .replace(/[,，、. ]/g, '') // カンマ・ピリオド・スペース除去
+    .replace(/[^0-9]/g, '');
 
   const results = [];
-  let m;
 
-  const pr = new RegExp(priorityRe.source, priorityRe.flags);
-  while ((m = pr.exec(text)) !== null) {
-    const n = m[1].replace(/[,，]/g, '');
-    if (parseInt(n) > 0) results.push({ val: n, priority: 2 });
+  // ── 優先度3：「合計金額」「請求金額」「御請求金額」などキーワード直後の数値 ──
+  const hiRe = /(?:御請求金額|請求金額|合計金額|お支払金額|お支払い金額|ご請求金額)[^\d]{0,15}([\d,，. oOlIsS]{3,15})/gi;
+  let m;
+  while ((m = hiRe.exec(text)) !== null) {
+    const n = cleanNum(m[1]);
+    const v = parseInt(n);
+    if (v >= 100) results.push({ val: n, pri: 3 });
   }
 
-  const gr = new RegExp(generalRe.source, generalRe.flags);
-  while ((m = gr.exec(text)) !== null) {
-    const raw = (m[1] || m[2] || '').replace(/[,，]/g, '');
-    if (parseInt(raw) > 0) results.push({ val: raw, priority: 1 });
+  // ── 優先度2：「合計」「請求」「総額」などキーワード直後の数値 ──
+  const midRe = /(?:合計|総計|総額|請求額|請求[^書番]{0,2}|お支払[^金]{0,2}|支払金額|ご請求|御請求|amount|total)[^\d]{0,20}([\d,，. oOlIsS]{3,15})/gi;
+  while ((m = midRe.exec(text)) !== null) {
+    const n = cleanNum(m[1]);
+    const v = parseInt(n);
+    if (v >= 100) results.push({ val: n, pri: 2 });
+  }
+
+  // ── 優先度2：¥マーク直後の数値 ──
+  const yenRe = /[¥￥\\]\s?([\d,，. oOlIsS]{3,15})/g;
+  while ((m = yenRe.exec(text)) !== null) {
+    const n = cleanNum(m[1]);
+    const v = parseInt(n);
+    if (v >= 1000) results.push({ val: n, pri: 2 });
+  }
+
+  // ── 優先度1：「円」前の数値 ──
+  const enRe = /([\d,，. oOlIsS]{3,15})円/g;
+  while ((m = enRe.exec(text)) !== null) {
+    const n = cleanNum(m[1]);
+    const v = parseInt(n);
+    if (v >= 1000) results.push({ val: n, pri: 1 });
+  }
+
+  // ── 優先度1：カンマ区切り数値（1,000以上） ──
+  const commaRe = /\b(\d{1,3}(?:[,，]\d{3})+)\b/g;
+  while ((m = commaRe.exec(text)) !== null) {
+    const n = cleanNum(m[1]);
+    const v = parseInt(n);
+    if (v >= 1000) results.push({ val: n, pri: 1 });
   }
 
   if (!results.length) return null;
-  results.sort((a,b) => b.priority - a.priority || parseInt(b.val) - parseInt(a.val));
+
+  // 優先度が高く、かつ値が大きいものを採用
+  results.sort((a, b) => b.pri - a.pri || parseInt(b.val) - parseInt(a.val));
   return results[0].val;
 }
 
