@@ -764,36 +764,58 @@ function parseText(text, file) {
 
 // ── テキストから会社名を抽出 ──
 function extractCompany(text) {
-  // 除外ワード（自社名）
   const ownRe = new RegExp(OWN.join('|'), 'i');
-
-  // 「株式会社XX」「XX株式会社」「XX有限会社」などにマッチ
-  const patterns = [
-    /(?:株式会社|有限会社|合同会社)[\s　]*([^\s　、,，。\n（(]{2,20})/g,
-    /([^\s　、,，。\n（(]{2,20})[\s　]*(?:株式会社|有限会社|合同会社)/g,
-    /(?:御中|様)\s*([^\s　、,，。\n（(]{2,15})/g,
-    /取引先[：:\s]*([^\s　、,，。\n]{2,15})/g,
-    /発注元[：:\s]*([^\s　、,，。\n]{2,15})/g,
-    /請求先[：:\s]*([^\s　、,，。\n]{2,15})/g,
-  ];
+  // 商号ワード
+  const CORP = '(?:株式会社|有限会社|合同会社|一般社団法人|公益社団法人|特定非営利活動法人|NPO法人|（株）|㈱)';
+  const NAME = '[^\\s　、,，。．\\n（()）【】「」『』]{1,20}';
 
   const candidates = [];
-  for (const pat of patterns) {
-    let m;
-    const re = new RegExp(pat.source, pat.flags);
-    while ((m = re.exec(text)) !== null) {
-      const name = m[1].trim().replace(/[株式会社有限合同]/g, '').replace(/[(（）)]/g, '').trim();
-      if (name.length >= 2 && !ownRe.test(name)) {
-        candidates.push(name);
-      }
-    }
+
+  // パターン① 前株：「株式会社アマナ」→ アマナ
+  const reFwd = new RegExp(CORP + '[\\s　]*(' + NAME + ')', 'g');
+  let m;
+  while ((m = reFwd.exec(text)) !== null) {
+    const n = m[1].trim();
+    if (n.length >= 2 && !ownRe.test(n)) candidates.push({ name: n, pri: 3 });
   }
 
-  // 最頻出の候補を返す
+  // パターン② 後株：「アマナ株式会社」→ アマナ
+  const reBack = new RegExp('(' + NAME + ')[\\s　]*' + CORP, 'g');
+  while ((m = reBack.exec(text)) !== null) {
+    const n = m[1].trim();
+    if (n.length >= 2 && !ownRe.test(n)) candidates.push({ name: n, pri: 3 });
+  }
+
+  // パターン③ 「御中」の直前にある会社名（「株式会社アマナ 御中」）
+  const reOchu = new RegExp('(' + NAME + CORP + '[\\s　]*|' + CORP + NAME + '[\\s　]*)御中', 'g');
+  while ((m = reOchu.exec(text)) !== null) {
+    // 商号を除いた純粋な社名部分を取り出す
+    const raw = m[1].trim().replace(/株式会社|有限会社|合同会社|一般社団法人|（株）|㈱/g, '').trim();
+    if (raw.length >= 2 && !ownRe.test(raw)) candidates.push({ name: raw, pri: 4 });
+  }
+
+  // パターン④ ラベル後：「請求先：アマナ株式会社」など
+  const reLabel = /(?:請求先|発注元|取引先|お客様|宛先)[：:\s　]{0,3}([^\s　\n]{2,20})/g;
+  while ((m = reLabel.exec(text)) !== null) {
+    const raw = m[1].replace(/株式会社|有限会社|合同会社|（株）|㈱/g, '').trim();
+    if (raw.length >= 2 && !ownRe.test(raw)) candidates.push({ name: raw, pri: 2 });
+  }
+
   if (!candidates.length) return null;
+
+  // 優先度→出現回数の順でソートし最上位を返す
   const freq = {};
-  candidates.forEach(c => { freq[c] = (freq[c]||0)+1; });
-  return Object.entries(freq).sort((a,b) => b[1]-a[1])[0][0];
+  candidates.forEach(c => {
+    const k = c.name;
+    if (!freq[k]) freq[k] = { count: 0, pri: c.pri };
+    freq[k].count++;
+    if (c.pri > freq[k].pri) freq[k].pri = c.pri;
+  });
+
+  const sorted = Object.entries(freq).sort((a, b) =>
+    b[1].pri - a[1].pri || b[1].count - a[1].count
+  );
+  return sorted[0][0];
 }
 
 // ── テキストから金額を抽出 ──
