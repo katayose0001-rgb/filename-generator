@@ -378,7 +378,6 @@
       <div class="app-title">ファイル名生成ツール</div>
       <div class="app-sub">格納ファイルの名称付与ルール準拠</div>
     </div>
-    <div class="brand">-FUJIOH-</div>
   </div>
 
   <!-- Progress steps -->
@@ -614,20 +613,8 @@ async function runOCR(blob) {
       return;
     }
 
-    // テキスト抽出
-    const company = extractCompany(text);
-    const amount  = extractAmount(text);
-
-    document.getElementById('extSection').style.display = 'block';
-    setExtField('extCo', 'badgeCo', 'iCo', company);
-    setExtField('extAmt', 'badgeAmt', 'iAmt', amount);
-
-    const parts = [];
-    if (company) parts.push('会社名：' + company);
-    if (amount)  parts.push('金額：'   + amount);
-    showMsg('extMsg', 'ok', '✓ OCR完了 ' + (parts.length ? parts.join('　') : '— 内容を確認して手動修正してください'));
-    markStep(2, true);
-    preview();
+    // parseTextに渡して候補表示（fileはnull=ドロップゾーン更新なし）
+    parseText(text, null);
 
   } catch(e) {
     document.getElementById('ocrProgress').style.display = 'none';
