@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ファイル名生成ツール — FUJIOH</title>
+<style>
+  :root {
+    --bg: #f0ede8;
+    --surface: #ffffff;
+    --surface2: #f7f5f2;
+    --surface3: #eeebe6;
+    --border: rgba(0,0,0,0.10);
+    --border-mid: rgba(0,0,0,0.16);
+    --border-strong: rgba(0,0,0,0.22);
+    --text: #1c1a18;
+    --text-2: #5c5850;
+    --text-3: #9c9890;
+    --accent: #1a4fa0;
+    --accent-bg: #eaf0fb;
+    --accent-border: rgba(26,79,160,0.25);
+    --accent-text: #0e3272;
+    --success: #0f6e56;
+    --success-bg: #e2f5ef;
+    --success-border: rgba(15,110,86,0.25);
+    --danger: #b83025;
+    --danger-bg: #fdf0ee;
+    --danger-border: rgba(184,48,37,0.25);
+    --warning: #9a6010;
+    --warning-bg: #fef3e0;
+    --warning-border: rgba(154,96,16,0.25);
+    --r: 10px;
+    --r-sm: 6px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Meiryo', sans-serif;
+    background: var(--bg);
+    min-height: 100vh;
+    padding: 2rem 1rem 3rem;
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .page {
+    max-width: 660px;
+    margin: 0 auto;
+  }
+
+  /* ── Header ── */
+  .app-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-mid);
+  }
+  .app-title { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+  .app-sub { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+  .brand {
+    font-size: 11px; font-weight: 700; letter-spacing: .14em;
+    color: var(--accent); border: 1.5px solid var(--accent);
+    padding: 3px 9px; border-radius: 3px;
+  }
+
+  /* ── Card ── */
+  .card {
+    background: var(--surface);
+    border-radius: var(--r);
+    border: 1px solid var(--border-mid);
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .card-head {
+    background: var(--accent);
+    padding: 11px 18px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .card-head-text h2 { font-size: 14px; font-weight: 600; color: #fff; }
+  .card-head-text p  { font-size: 11px; color: rgba(255,255,255,.72); margin-top:1px; }
+  .card-body { padding: 18px; }
+
+  /* ── Warning ── */
+  .warn {
+    background: var(--danger-bg);
+    border: 1px solid var(--danger-border);
+    border-radius: var(--r-sm);
+    padding: 8px 12px; margin-bottom: 14px;
+    font-size: 12px; color: var(--danger);
+    display: flex; gap: 6px; align-items: flex-start;
+  }
+  .warn svg { flex-shrink: 0; margin-top: 1px; }
+
+  /* ── Rule box ── */
+  .rule {
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-border);
+    border-radius: var(--r-sm);
+    padding: 10px 14px; margin-bottom: 16px;
+  }
+  .rule-fmt {
+    font-family: 'Courier New', monospace;
+    font-size: 13px; font-weight: 700;
+    color: var(--accent-text); margin-bottom: 7px;
+    letter-spacing: .03em;
+  }
+  .tags { display: flex; flex-wrap: wrap; gap: 5px; }
+  .tag {
+    font-size: 11px; padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--surface);
+    border: 1px solid var(--accent-border);
+    color: var(--accent-text);
+  }
+
+  /* ── Section heading ── */
+  .sec {
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .08em;
+    color: var(--text-2); margin: 16px 0 8px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sec::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  /* ── Form ── */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  .fg { display: flex; flex-direction: column; gap: 4px; }
+  label.lbl {
+    font-size: 12px; font-weight: 600; color: var(--text-2);
+    display: flex; align-items: center; gap: 4px;
+  }
+  .req { color: var(--danger); font-size: 11px; }
+
+  input[type=text], input[type=date], select {
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-sm);
+    padding: 8px 10px;
+    font-size: 13px; font-family: inherit;
+    color: var(--text); background: var(--surface);
+    outline: none; width: 100%;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  input:focus, select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(26,79,160,.1);
+  }
+  input.ok  { border-color: var(--success); }
+  input.err { border-color: var(--danger); }
+
+  /* ── Drop zone ── */
+  .dz {
+    border: 2px dashed var(--border-strong);
+    border-radius: var(--r);
+    padding: 26px 16px; text-align: center;
+    cursor: pointer; transition: all .2s;
+    background: var(--surface2); margin-bottom: 10px;
+    position: relative;
+  }
+  .dz:hover, .dz.over { border-color: var(--accent); background: var(--accent-bg); }
+  .dz.done  { border-style: solid; border-color: var(--success); background: var(--success-bg); }
+  .dz.busy  { border-color: var(--warning); background: var(--warning-bg); }
+  #fi { display: none; }
+  .dz-ico { font-size: 28px; margin-bottom: 6px; }
+  .dz-t   { font-size: 13px; font-weight: 600; color: var(--text); }
+  .dz-s   { font-size: 12px; color: var(--text-2); margin-top: 2px; }
+  .dz-hint{ font-size: 11px; color: var(--text-3); margin-top: 5px; }
+
+  /* ── Extracted rows ── */
+  .ext-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; margin-bottom: 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm); font-size: 13px;
+  }
+  .ext-lbl { color: var(--text-2); min-width: 76px; font-size: 12px; }
+  .ext-val { flex: 1; font-weight: 600; color: var(--text); }
+  .badge {
+    font-size: 10px; padding: 2px 7px;
+    border-radius: 10px; font-weight: 600;
+  }
+  .b-ok { background: var(--success-bg); color: var(--success); }
+  .b-ng { background: var(--warning-bg); color: var(--warning); }
+
+  /* ── Type selector ── */
+  .type-wrap { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .tb {
+    padding: 6px 13px; border-radius: 20px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    font-size: 12px; font-family: inherit;
+    cursor: pointer; color: var(--text-2);
+    transition: all .15s;
+  }
+  .tb:hover { border-color: var(--accent); color: var(--accent); }
+  .tb.on {
+    background: var(--accent); color: #fff;
+    border-color: var(--accent); font-weight: 600;
+  }
+
+  /* ── Output ── */
+  .out-box {
+    background: var(--surface2);
+    border: 1px solid var(--border-mid);
+    border-radius: var(--r);
+    padding: 14px; margin-bottom: 14px;
+  }
+  .out-lbl {
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .07em;
+    color: var(--text-3); margin-bottom: 8px;
+  }
+  .out-fn {
+    font-family: 'Courier New', monospace;
+    font-size: 15px; font-weight: 700;
+    color: var(--accent-text);
+    padding: 11px 13px;
+    background: var(--surface);
+    border: 1px solid var(--accent-border);
+    border-radius: var(--r-sm);
+    min-height: 44px; word-break: break-all;
+    line-height: 1.4;
+  }
+  .out-fn.empty {
+    color: var(--text-3); font-family: inherit;
+    font-size: 12px; font-weight: 400;
+    font-style: italic;
+  }
+
+  /* ── Buttons ── */
+  .btn-row { display: flex; gap: 8px; justify-content: flex-end; }
+  .btn {
+    padding: 9px 18px; border-radius: var(--r-sm);
+    font-size: 13px; font-family: inherit; font-weight: 600;
+    cursor: pointer; border: 1px solid var(--border-strong);
+    background: var(--surface); color: var(--text-2);
+    transition: all .15s;
+  }
+  .btn:hover { background: var(--surface3); color: var(--text); }
+  .btn:active { transform: scale(.98); }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover { background: #133d80; }
+  .btn-success { background: var(--success); color: #fff; border-color: var(--success); }
+  .btn-success:hover { background: #0a5240; }
+  .btn-sm { padding: 5px 12px; font-size: 12px; }
+
+  /* ── Status messages ── */
+  .msg {
+    font-size: 12px; padding: 8px 11px;
+    border-radius: var(--r-sm); margin-top: 8px;
+    display: none; align-items: center; gap: 6px;
+  }
+  .msg.show { display: flex; }
+  .msg-ok   { background: var(--success-bg); color: var(--success); border: 1px solid var(--success-border); }
+  .msg-ng   { background: var(--danger-bg);  color: var(--danger);  border: 1px solid var(--danger-border); }
+  .msg-warn { background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border); }
+
+  /* ── Spinner ── */
+  .spin {
+    width: 14px; height: 14px;
+    border: 2px solid rgba(0,0,0,.12);
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    display: inline-block; flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── History ── */
+  .hist-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .hist-fn { font-family: 'Courier New', monospace; color: var(--accent-text); flex: 1; word-break: break-all; }
+  .hist-dt { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+
+  .divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+
+  /* ── Progress indicator ── */
+  .steps {
+    display: flex; gap: 0; margin-bottom: 18px;
+    border: 1px solid var(--border-mid);
+    border-radius: var(--r-sm); overflow: hidden;
+  }
+  .step {
+    flex: 1; padding: 8px 4px; text-align: center;
+    font-size: 11px; font-weight: 600; color: var(--text-3);
+    background: var(--surface2);
+    border-right: 1px solid var(--border);
+    transition: all .2s;
+  }
+  .step:last-child { border-right: none; }
+  .step.done { background: var(--success-bg); color: var(--success); }
+  .step.active { background: var(--accent-bg); color: var(--accent-text); }
+  .step-num { display: block; font-size: 14px; font-weight: 700; }
+
+  /* ── Footer ── */
+  .footer {
+    text-align: center; font-size: 11px; color: var(--text-3);
+    margin-top: 1.5rem;
+  }
+
+  @media (max-width: 480px) {
+    .grid2 { grid-template-columns: 1fr; }
+    .out-fn { font-size: 12px; }
+    .steps { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- Header -->
+  <div class="app-header">
+    <div>
+      <div class="app-title">ファイル名生成ツール</div>
+      <div class="app-sub">格納ファイルの名称付与ルール準拠</div>
+    </div>
+    <div class="brand">-FUJIOH-</div>
+  </div>
+
+  <!-- Progress steps -->
+  <div class="steps">
+    <div class="step active" id="s1"><span class="step-num">①</span>日付</div>
+    <div class="step" id="s2"><span class="step-num">②</span>ファイル</div>
+    <div class="step" id="s3"><span class="step-num">③</span>確認</div>
+    <div class="step" id="s4"><span class="step-num">④</span>帳票種別</div>
+    <div class="step" id="s5"><span class="step-num">⑤</span>生成</div>
+  </div>
+
+  <!-- Main card -->
+  <div class="card">
+    <div class="card-head">
+      <svg width="18" height="18" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      <div class="card-head-text">
+        <h2>格納ファイル名の自動生成</h2>
+        <p>yyyymmdd _ 取引先名称 _ 取引金額 _ 帳票種別</p>
+      </div>
+    </div>
+    <div class="card-body">
+
+      <!-- Warning -->
+      <div class="warn">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        アンダーバーおよび全角・半角が異なると自動格納できないため、ご留意をお願いします。
+      </div>
+
+      <!-- Rule -->
+      <div class="rule">
+        <div class="rule-fmt">yyyymmdd _ 取引先名称 _ 取引金額 _ 帳票種別</div>
+        <div class="tags">
+          <span class="tag">数字は半角</span>
+          <span class="tag">文字は全角</span>
+          <span class="tag">区切りは半角 _</span>
+          <span class="tag">株式会社等の商号は不要</span>
+          <span class="tag">金額のカンマ・¥不要</span>
+          <span class="tag">CSVは金額を0</span>
+        </div>
+      </div>
+
+      <!-- ① Date -->
+      <div class="sec">① 取引日付</div>
+      <div class="grid2">
+        <div class="fg">
+          <label class="lbl" for="iDate">日付（yyyymmdd）<span class="req">必須</span></label>
+          <input type="text" id="iDate" placeholder="例：20220915" maxlength="8" oninput="onDate(this)" autocomplete="off">
+        </div>
+        <div class="fg">
+          <label class="lbl" for="iPick">カレンダーで入力</label>
+          <input type="date" id="iPick" onchange="fromPick(this)">
+        </div>
+      </div>
+
+      <!-- ② File drop -->
+      <div class="sec">② ファイルをドロップして情報を抽出</div>
+      <div class="dz" id="dz" onclick="document.getElementById('fi').click()">
+        <input type="file" id="fi" accept=".pdf,.png,.jpg,.jpeg,.txt,.csv" onchange="onFile(event)">
+        <div class="dz-ico" id="dzIco">📂</div>
+        <div class="dz-t" id="dzT">ファイルをドラッグ＆ドロップ</div>
+        <div class="dz-s" id="dzS">またはクリックしてファイルを選択</div>
+        <div class="dz-hint">テキスト・CSV対応（PDF・画像はテキスト抽出なし）</div>
+      </div>
+      <div id="extMsg"></div>
+
+      <div id="extSection" style="display:none; margin-bottom:12px">
+        <div class="ext-row">
+          <span class="ext-lbl">取引先会社名</span>
+          <span class="ext-val" id="extCo">—</span>
+          <span class="badge" id="badgeCo">抽出済</span>
+        </div>
+        <div class="ext-row">
+          <span class="ext-lbl">取引金額</span>
+          <span class="ext-val" id="extAmt">—</span>
+          <span class="badge" id="badgeAmt">抽出済</span>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- ③ Manual input -->
+      <div class="sec">③ 確認・手動修正</div>
+      <div class="grid2">
+        <div class="fg">
+          <label class="lbl" for="iCo">取引先名称（全角）<span class="req">必須</span></label>
+          <input type="text" id="iCo" placeholder="例：クリナップ" oninput="preview()" autocomplete="off">
+        </div>
+        <div class="fg">
+          <label class="lbl" for="iAmt">取引金額（半角数字）<span class="req">必須</span></label>
+          <input type="text" id="iAmt" placeholder="例：500000（CSVは0）" oninput="cleanAmt(this)" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- ④ Doc type -->
+      <div class="sec">④ 帳票種別を選択</div>
+      <div class="type-wrap" id="typeWrap">
+        <button class="tb on" onclick="selType(this,'注文書')">注文書</button>
+        <button class="tb" onclick="selType(this,'見積書')">見積書</button>
+        <button class="tb" onclick="selType(this,'請求書')">請求書</button>
+        <button class="tb" onclick="selType(this,'契約書一覧')">契約書一覧</button>
+        <button class="tb" onclick="selType(this,'発注書')">発注書</button>
+        <button class="tb" onclick="selType(this,'納品書')">納品書</button>
+        <button class="tb" onclick="selType(this,'領収書')">領収書</button>
+      </div>
+      <div class="fg" style="margin-bottom:16px">
+        <label class="lbl" for="iType">その他（直接入力）</label>
+        <input type="text" id="iType" placeholder="帳票種別を直接入力" oninput="clearTypeBtns(); preview()" autocomplete="off">
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- ⑤ Output -->
+      <div class="sec">⑤ 生成ファイル名</div>
+      <div class="out-box">
+        <div class="out-lbl">生成されたファイル名</div>
+        <div class="out-fn empty" id="outFn">ファイル名生成ボタンを押してください</div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn" onclick="resetAll()">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" style="vertical-align:-1px;margin-right:4px"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.1"/></svg>リセット
+        </button>
+        <button class="btn btn-success" id="btnCp" onclick="copyFn()" style="display:none">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" style="vertical-align:-1px;margin-right:4px"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>コピー
+        </button>
+        <button class="btn btn-primary" onclick="generate()">
+          <svg width="13" height="13" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" style="vertical-align:-1px;margin-right:4px"><polyline points="20 6 9 17 4 12"/></svg>ファイル名を生成
+        </button>
+      </div>
+      <div id="genMsg"></div>
+
+    </div>
+  </div>
+
+  <!-- History card -->
+  <div class="card">
+    <div class="card-body">
+      <div class="sec" style="margin-top:0">生成履歴</div>
+      <div id="hist">
+        <p style="font-size:12px;color:var(--text-3);text-align:center;padding:12px 0">まだ生成されていません</p>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button class="btn btn-sm" onclick="exportCSV()">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" style="vertical-align:-1px;margin-right:3px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>CSV出力
+        </button>
+        <button class="btn btn-sm" style="color:var(--danger)" onclick="clearHist()">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" style="vertical-align:-1px;margin-right:3px"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>履歴をクリア
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">ファイル名生成ツール — FUJIOH グループ内利用 &nbsp;|&nbsp; Ver1.0 &nbsp;|&nbsp; スタンドアロン版（API不使用）</div>
+
+</div><!-- /page -->
+
+<script>
+'use strict';
+
+// ── 自社名リスト（除外用） ──
+const OWN = ['アリアフィーナ','ariafina','ARIAFINA','富士工業','フジコー','fujioh','FUJIOH'];
+
+let docType = '注文書';
+let histData = [];
+let stepDone = [false, false, false, false, false];
+
+// ── ステップ進捗 ──
+function markStep(n, done) {
+  stepDone[n-1] = done;
+  const el = document.getElementById('s'+n);
+  if (!el) return;
+  el.classList.toggle('done', done);
+  el.classList.toggle('active', !done);
+}
+
+// ── 日付 ──
+function onDate(el) {
+  el.value = el.value.replace(/[^0-9]/g, '');
+  const v = el.value;
+  if (v.length === 8) {
+    el.classList.add('ok'); el.classList.remove('err');
+    syncPick(v); markStep(1, true);
+  } else {
+    el.classList.remove('ok');
+    el.classList.toggle('err', v.length > 0);
+    markStep(1, false);
+  }
+  preview();
+}
+
+function fromPick(el) {
+  const p = el.value.split('-');
+  if (p.length === 3) {
+    const v = p.join('');
+    const d = document.getElementById('iDate');
+    d.value = v; d.classList.add('ok'); d.classList.remove('err');
+    markStep(1, true); preview();
+  }
+}
+
+function syncPick(v) {
+  try {
+    document.getElementById('iPick').value = v.slice(0,4)+'-'+v.slice(4,6)+'-'+v.slice(6,8);
+  } catch(e) {}
+}
+
+// ── ドラッグ＆ドロップ ──
+const dz = document.getElementById('dz');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('over');
+  const f = e.dataTransfer.files[0];
+  if (f) procFile(f);
+});
+function onFile(e) { const f = e.target.files[0]; if (f) procFile(f); }
+
+function procFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  dz.classList.remove('done'); dz.classList.add('busy');
+  document.getElementById('dzT').textContent = file.name;
+  document.getElementById('dzS').textContent = (file.size/1024).toFixed(1) + ' KB — 読み込み中...';
+  document.getElementById('dzIco').textContent = '⏳';
+  showMsg('extMsg', 'warn', '<span class="spin"></span> ファイルを解析中...');
+
+  if (['txt', 'csv'].includes(ext)) {
+    const r = new FileReader();
+    r.onload = e => parseText(e.target.result, file);
+    r.onerror = () => fileError();
+    r.readAsText(file, 'UTF-8');
+  } else if (['png','jpg','jpeg','pdf'].includes(ext)) {
+    // 画像・PDFはテキスト抽出なし→ファイル名から推測
+    dz.classList.remove('busy'); dz.classList.add('done');
+    document.getElementById('dzIco').textContent = '📄';
+    document.getElementById('dzS').textContent = (file.size/1024).toFixed(1) + ' KB';
+    showMsg('extMsg', 'warn', '⚠ 画像・PDFはテキスト抽出に対応していません。会社名・金額を手動で入力してください。');
+    markStep(2, true);
+  } else {
+    fileError();
+  }
+}
+
+function fileError() {
+  dz.classList.remove('busy');
+  document.getElementById('dzIco').textContent = '❌';
+  showMsg('extMsg', 'ng', '⚠ このファイル形式は対応していません。手動で入力してください。');
+}
+
+function parseText(text, file) {
+  dz.classList.remove('busy'); dz.classList.add('done');
+  document.getElementById('dzIco').textContent = '✅';
+  document.getElementById('dzS').textContent = (file.size/1024).toFixed(1) + ' KB — 解析完了';
+
+  // ── 会社名抽出 ──
+  const company = extractCompany(text);
+  // ── 金額抽出 ──
+  const amount = extractAmount(text);
+
+  document.getElementById('extSection').style.display = 'block';
+  setExtField('extCo', 'badgeCo', 'iCo', company);
+  setExtField('extAmt', 'badgeAmt', 'iAmt', amount);
+
+  const parts = [];
+  if (company) parts.push('会社名：' + company);
+  if (amount)  parts.push('金額：'   + amount);
+  showMsg('extMsg', 'ok', '✓ ' + (parts.length ? parts.join('　') : 'ファイルを読み込みました。内容を確認してください。'));
+  markStep(2, true);
+  preview();
+}
+
+// ── テキストから会社名を抽出 ──
+function extractCompany(text) {
+  // 除外ワード（自社名）
+  const ownRe = new RegExp(OWN.join('|'), 'i');
+
+  // 「株式会社XX」「XX株式会社」「XX有限会社」などにマッチ
+  const patterns = [
+    /(?:株式会社|有限会社|合同会社)[\s　]*([^\s　、,，。\n（(]{2,20})/g,
+    /([^\s　、,，。\n（(]{2,20})[\s　]*(?:株式会社|有限会社|合同会社)/g,
+    /(?:御中|様)\s*([^\s　、,，。\n（(]{2,15})/g,
+    /取引先[：:\s]*([^\s　、,，。\n]{2,15})/g,
+    /発注元[：:\s]*([^\s　、,，。\n]{2,15})/g,
+    /請求先[：:\s]*([^\s　、,，。\n]{2,15})/g,
+  ];
+
+  const candidates = [];
+  for (const pat of patterns) {
+    let m;
+    const re = new RegExp(pat.source, pat.flags);
+    while ((m = re.exec(text)) !== null) {
+      const name = m[1].trim().replace(/[株式会社有限合同]/g, '').replace(/[(（）)]/g, '').trim();
+      if (name.length >= 2 && !ownRe.test(name)) {
+        candidates.push(name);
+      }
+    }
+  }
+
+  // 最頻出の候補を返す
+  if (!candidates.length) return null;
+  const freq = {};
+  candidates.forEach(c => { freq[c] = (freq[c]||0)+1; });
+  return Object.entries(freq).sort((a,b) => b[1]-a[1])[0][0];
+}
+
+// ── テキストから金額を抽出 ──
+function extractAmount(text) {
+  // 「合計」「総額」「お支払い」「請求額」「金額」などに続く数字を優先
+  const priorityRe = /(?:合計|総計|総額|請求[金額]|お支払[金額い]|支払[金額]|御請求|amount|total)[^\d]{0,10}([0-9,，]{3,})/gi;
+  const generalRe  = /[¥￥\\][\s]?([0-9,，]{3,})|([0-9]{1,3}(?:[,，][0-9]{3})+)(?:\s*円)?/g;
+
+  const results = [];
+  let m;
+
+  const pr = new RegExp(priorityRe.source, priorityRe.flags);
+  while ((m = pr.exec(text)) !== null) {
+    const n = m[1].replace(/[,，]/g, '');
+    if (parseInt(n) > 0) results.push({ val: n, priority: 2 });
+  }
+
+  const gr = new RegExp(generalRe.source, generalRe.flags);
+  while ((m = gr.exec(text)) !== null) {
+    const raw = (m[1] || m[2] || '').replace(/[,，]/g, '');
+    if (parseInt(raw) > 0) results.push({ val: raw, priority: 1 });
+  }
+
+  if (!results.length) return null;
+  results.sort((a,b) => b.priority - a.priority || parseInt(b.val) - parseInt(a.val));
+  return results[0].val;
+}
+
+function setExtField(valId, badgeId, inputId, val) {
+  const badge = document.getElementById(badgeId);
+  const inp   = document.getElementById(inputId);
+  if (val) {
+    document.getElementById(valId).textContent = val;
+    inp.value = val; inp.classList.add('ok');
+    badge.className = 'badge b-ok'; badge.textContent = '抽出済';
+  } else {
+    document.getElementById(valId).textContent = '抽出できませんでした';
+    badge.className = 'badge b-ng'; badge.textContent = '手動入力';
+  }
+}
+
+// ── 帳票種別 ──
+function selType(btn, type) {
+  document.querySelectorAll('.tb').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  docType = type;
+  document.getElementById('iType').value = '';
+  markStep(4, true);
+  preview();
+}
+function clearTypeBtns() {
+  document.querySelectorAll('.tb').forEach(b => b.classList.remove('on'));
+  docType = document.getElementById('iType').value;
+  markStep(4, !!docType);
+}
+
+// ── 金額クリーニング ──
+function cleanAmt(el) {
+  el.value = el.value.replace(/[¥￥,，円\s]/g, '').replace(/[^0-9]/g, '');
+  preview();
+}
+
+// ── プレビュー ──
+function preview() {
+  const d = document.getElementById('iDate').value;
+  const c = document.getElementById('iCo').value.trim();
+  const a = document.getElementById('iAmt').value.trim();
+  const t = document.getElementById('iType').value.trim() || docType;
+  const el = document.getElementById('outFn');
+
+  markStep(3, !!(c && a));
+
+  if (d && c && a && t) {
+    el.textContent = d + '_' + c + '_' + a + '_' + t;
+    el.classList.remove('empty');
+  }
+}
+
+// ── 生成 ──
+function generate() {
+  const d = document.getElementById('iDate').value.trim();
+  const c = document.getElementById('iCo').value.trim();
+  const a = document.getElementById('iAmt').value.trim();
+  const t = document.getElementById('iType').value.trim() || docType;
+
+  const errs = [];
+  if (!d || d.length !== 8) errs.push('日付（8桁）');
+  if (!c) errs.push('取引先名称');
+  if (!a) errs.push('取引金額');
+  if (!t) errs.push('帳票種別');
+  if (errs.length) {
+    showMsg('genMsg', 'ng', '⚠ 未入力項目：' + errs.join('、'));
+    return;
+  }
+
+  const fn = d + '_' + c + '_' + a + '_' + t;
+  const el = document.getElementById('outFn');
+  el.textContent = fn; el.classList.remove('empty');
+  document.getElementById('btnCp').style.display = 'inline-block';
+  showMsg('genMsg', 'ok', '✓ ファイル名を生成しました');
+  markStep(5, true);
+
+  histData.push({ fn, d, c, a, t, at: new Date().toLocaleString('ja-JP') });
+  renderHist();
+}
+
+// ── コピー ──
+function copyFn() {
+  const fn = document.getElementById('outFn').textContent;
+  if (document.getElementById('outFn').classList.contains('empty')) return;
+  navigator.clipboard.writeText(fn).then(() => {
+    const b = document.getElementById('btnCp');
+    const orig = b.innerHTML;
+    b.textContent = '✓ コピーしました';
+    setTimeout(() => { b.innerHTML = orig; }, 1800);
+  });
+}
+
+// ── リセット ──
+function resetAll() {
+  ['iDate','iCo','iAmt','iType'].forEach(id => {
+    const el = document.getElementById(id);
+    el.value = ''; el.classList.remove('ok','err');
+  });
+  document.getElementById('iPick').value = '';
+  dz.classList.remove('done','busy','over');
+  document.getElementById('dzIco').textContent = '📂';
+  document.getElementById('dzT').textContent = 'ファイルをドラッグ＆ドロップ';
+  document.getElementById('dzS').textContent = 'またはクリックしてファイルを選択';
+  document.getElementById('extSection').style.display = 'none';
+  document.getElementById('fi').value = '';
+  document.querySelectorAll('.tb').forEach((b,i) => b.classList.toggle('on', i===0));
+  docType = '注文書';
+  const el = document.getElementById('outFn');
+  el.textContent = 'ファイル名生成ボタンを押してください'; el.classList.add('empty');
+  document.getElementById('btnCp').style.display = 'none';
+  ['extMsg','genMsg'].forEach(id => { document.getElementById(id).className = 'msg'; });
+  stepDone = [false,false,false,false,false];
+  [1,2,3,4,5].forEach(n => {
+    const s = document.getElementById('s'+n);
+    if(s){ s.classList.remove('done'); s.classList.toggle('active', n===1); }
+  });
+}
+
+// ── 履歴 ──
+function renderHist() {
+  const el = document.getElementById('hist');
+  if (!histData.length) {
+    el.innerHTML = '<p style="font-size:12px;color:var(--text-3);text-align:center;padding:12px 0">まだ生成されていません</p>';
+    return;
+  }
+  el.innerHTML = histData.slice().reverse().map((h,i) => `
+    <div class="hist-row">
+      <span class="hist-fn">${h.fn}</span>
+      <span class="hist-dt">${h.at}</span>
+      <button class="btn btn-sm" onclick="reuseHist(${histData.length-1-i})" style="padding:3px 9px;font-size:11px">再利用</button>
+    </div>`).join('');
+}
+
+function reuseHist(idx) {
+  const h = histData[idx];
+  document.getElementById('iDate').value = h.d; document.getElementById('iDate').classList.add('ok');
+  document.getElementById('iCo').value   = h.c;
+  document.getElementById('iAmt').value  = h.a;
+  document.getElementById('iType').value = h.t;
+  syncPick(h.d); generate();
+}
+
+function clearHist() {
+  if (confirm('履歴をすべて削除しますか？')) { histData = []; renderHist(); }
+}
+
+// ── CSV出力 ──
+function exportCSV() {
+  if (!histData.length) { alert('生成履歴がありません。'); return; }
+  const header = ['ファイル名','取引日付','取引先名称','取引金額','帳票種別','生成日時'];
+  const rows   = histData.map(h => [h.fn, h.d, h.c, h.a, h.t, h.at]);
+  const csv    = [header, ...rows]
+    .map(r => r.map(v => '"' + String(v).replace(/"/g,'""') + '"').join(','))
+    .join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = 'filename_history_' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── メッセージ表示 ──
+function showMsg(id, type, html) {
+  const el = document.getElementById(id);
+  el.className = 'msg show msg-' + type;
+  el.innerHTML = html;
+}
+</script>
+</body>
+</html>
