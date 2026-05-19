@@ -782,103 +782,72 @@ function stripCorpSuffix(s) {
 
 // ── テキストから会社名を抽出 ──
 function extractCompany(rawText) {
-  const text = normalizeOcrText(rawText);
   const ownRe = new RegExp(OWN.join('|'), 'i');
+  const CORP_LIST = ['株式会社','有限会社','合同会社','一般社団法人','公益社団法人','（株）','㈱'];
 
-  // OCRは空白が不規則に挿入されるため、空白を無視してマッチできる結合テキストも用意
-  const flat = text.replace(/\s/g, '');
-
+  // OCRは空白・改行を不規則に挿入するため
+  // ① 元テキスト ② 空白/改行を完全除去したフラット文字列 の両方で検索する
+  const flat = rawText.replace(/[\s\u3000]/g, '');
   const candidates = [];
+  const seen = new Set();
 
-  // ── 商号パターン（空白が挿入されていても対応）──
-  // 「株 式 会 社 ア イ ワ」のようにOCRがスペースを入れるケースに対応
-  const corpVariants = [
-    '株式会社', '有限会社', '合同会社', '一般社団法人', '（株）', '㈱'
-  ];
-
-  // flatテキストで商号＋社名 or 社名＋商号を探す
-  for (const corp of corpVariants) {
-    // 前株：株式会社○○
-    const idxFwd = flat.indexOf(corp);
-    if (idxFwd !== -1) {
-      const after = flat.slice(idxFwd + corp.length, idxFwd + corp.length + 20)
-        .replace(/[0-9\-－:：\/\\.,，。、（()）【】「」\s]/g, '');
-      if (after.length >= 2 && !ownRe.test(after)) {
-        candidates.push({ name: after, pri: 3 });
-      }
-    }
-    // 後株：○○株式会社
-    const idxBack = flat.indexOf(corp);
-    if (idxBack > 0) {
-      const before = flat.slice(Math.max(0, idxBack - 20), idxBack)
-        .replace(/[0-9\-－:：\/\\.,，。、（()）【】「」\s]/g, '');
-      if (before.length >= 2 && !ownRe.test(before)) {
-        candidates.push({ name: before, pri: 3 });
-      }
+  function addCandidate(name, pri) {
+    const n = name
+      .replace(/[\s\u3000]/g, '')                          // 空白除去
+      .replace(/株式会社|有限会社|合同会社|一般社団法人|公益社団法人|（株）|㈱/g, '') // 商号除去
+      .replace(/[0-9０-９\-－:：\/\\.,，。、（()）【】「」『』〒]/g, '') // 記号除去
+      .trim();
+    if (n.length >= 2 && !ownRe.test(n) && !seen.has(n)) {
+      seen.add(n);
+      candidates.push({ name: n, pri });
     }
   }
 
-  // 全出現位置を検索（複数の会社名がある場合に対応）
-  for (const corp of corpVariants) {
+  // ── フラットテキストで商号の前後を取得（OCRスペース挿入に対応）──
+  for (const corp of CORP_LIST) {
     let pos = 0;
-    while (true) {
+    while (pos < flat.length) {
       const idx = flat.indexOf(corp, pos);
       if (idx === -1) break;
       pos = idx + 1;
 
-      // 前株（株式会社○○）
-      const afterRaw = flat.slice(idx + corp.length, idx + corp.length + 15)
-        .replace(/[0-9\-－:：\/\\.,，。、（()）【】「」]/g, '');
-      if (afterRaw.length >= 2 && !ownRe.test(afterRaw)) {
-        candidates.push({ name: afterRaw, pri: 3 });
-      }
+      // 前株：株式会社○○ → 後ろ最大10文字
+      const after = flat.slice(idx + corp.length, idx + corp.length + 12)
+        .replace(/[0-9\-－:：\/\\.,，。、（()）【】「」〒]/g, '');
+      addCandidate(after, 3);
 
-      // 後株（○○株式会社）
-      const beforeRaw = flat.slice(Math.max(0, idx - 15), idx)
-        .replace(/[0-9\-－:：\/\\.,，。、（()）【】「」]/g, '');
-      if (beforeRaw.length >= 2 && !ownRe.test(beforeRaw)) {
-        candidates.push({ name: beforeRaw, pri: 3 });
-      }
+      // 後株：○○株式会社 → 前の最大10文字
+      const before = flat.slice(Math.max(0, idx - 12), idx)
+        .replace(/[0-9\-－:：\/\\.,，。、（()）【】「」〒]/g, '');
+      addCandidate(before, 3);
     }
   }
 
-  // 「御中」直前パターン（優先度最高）
-  const ochuRe = /([^\n]{2,25}(?:株式会社|有限会社|合同会社|（株）|㈱)[^\n]{0,10})\s*御中/g;
-  const ochuRe2 = /([^\n]{2,25})\s*御中/g;
+  // ── 元テキストで「御中」直前パターン（優先度最高）──
+  // 「アリアフィーナ 株式会社 御中」「株式会社アマナ\n御中」など
+  const ochuRe = /(.{2,30}?)\s*御中/g;
   let m;
-  while ((m = ochuRe.exec(text)) !== null) {
-    const n = stripCorpSuffix(m[1]);
-    if (n.length >= 2 && !ownRe.test(n)) candidates.push({ name: n, pri: 5 });
-  }
-  while ((m = ochuRe2.exec(text)) !== null) {
-    const n = stripCorpSuffix(m[1]).replace(/\s/g,'');
-    if (n.length >= 2 && !ownRe.test(n)) candidates.push({ name: n, pri: 4 });
+  while ((m = ochuRe.exec(rawText)) !== null) {
+    const chunk = m[1];
+    // 商号を含む行を優先
+    if (CORP_LIST.some(c => chunk.replace(/\s/g,'').includes(c))) {
+      addCandidate(chunk, 5);
+    } else {
+      addCandidate(chunk, 4);
+    }
   }
 
-  // ラベルパターン
-  const labelRe = /(?:請求先|発注元|取引先|お客様|宛先)\s*[：:]\s*([^\n]{2,25})/g;
-  while ((m = labelRe.exec(text)) !== null) {
-    const n = stripCorpSuffix(m[1]).replace(/\s/g,'');
-    if (n.length >= 2 && !ownRe.test(n)) candidates.push({ name: n, pri: 2 });
+  // ── ラベルパターン ──
+  const labelRe = /(?:請求先|発注元|取引先|お客様|宛先)\s*[：:]\s*(.{2,20})/g;
+  while ((m = labelRe.exec(rawText)) !== null) {
+    addCandidate(m[1], 2);
   }
 
   if (!candidates.length) return null;
 
-  // 優先度→出現回数でソート
-  const freq = {};
-  candidates.forEach(c => {
-    const k = c.name;
-    if (!freq[k]) freq[k] = { count: 0, pri: c.pri };
-    freq[k].count++;
-    if (c.pri > freq[k].pri) freq[k].pri = c.pri;
-  });
-
-  // 自社名を最終除外
-  const filtered = Object.entries(freq).filter(([k]) => !ownRe.test(k));
-  if (!filtered.length) return null;
-
-  filtered.sort((a, b) => b[1].pri - a[1].pri || b[1].count - a[1].count);
-  return filtered[0][0];
+  // 優先度の高いものを返す（同優先度なら短い方＝余計な文字が少ない）
+  candidates.sort((a, b) => b.pri - a.pri || a.name.length - b.name.length);
+  return candidates[0].name;
 }
 
 // ── テキストから金額を抽出 ──
